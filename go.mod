@@ -14,6 +14,8 @@ require (
 )
 
 require (
+	github.com/PuerkitoBio/goquery v1.9.2 // indirect
+	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
@@ -24,6 +26,7 @@ require (
 	cloud.google.com/go/auth v0.16.2 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.7.0 // indirect
+	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/bytedance/sonic v1.11.6 // indirect
 	github.com/bytedance/sonic/loader v0.1.1 // indirect
 	github.com/cloudwego/base64x v0.1.4 // indirect

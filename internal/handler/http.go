@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
 	"html/template"
 	"main/internal/auth"
@@ -10,6 +11,7 @@ import (
 	"main/internal/model"
 	"net/http"
 
+	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/antonlindstrom/pgstore"
 	"github.com/gin-gonic/gin"
 	"github.com/markbates/goth/gothic"
@@ -161,11 +163,32 @@ func (h *Handler) Summaries(c *gin.Context) {
 		return
 	}
 
-	labels, err := gmailService.Users.Labels.List("me").Do()
+	mails, err := gmailService.Users.Messages.List("me").Do()
 	if err != nil {
 		c.AbortWithError(http.StatusInternalServerError, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, labels)
+	m, err := gmailService.Users.Messages.Get("me", mails.Messages[0].Id).Do()
+
+	if err != nil {
+		c.AbortWithError(http.StatusInternalServerError, err)
+		return
+	}
+
+	data, err := base64.URLEncoding.DecodeString(m.Payload.Parts[1].Body.Data)
+	if err != nil {
+		c.AbortWithError(http.StatusInternalServerError, err)
+		return
+	}
+
+	converter := md.NewConverter("", true, nil)
+
+	markdown, err := converter.ConvertString(string(data))
+	if err != nil {
+		c.AbortWithError(http.StatusInternalServerError, err)
+		return
+	}
+
+	c.Data(http.StatusOK, "text/markdown; charset=utf-8", fmt.Appendf(nil, "%s", markdown))
 }
