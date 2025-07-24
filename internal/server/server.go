@@ -2,13 +2,14 @@ package server
 
 import (
 	"database/sql"
-	"fmt"
 	"main/internal/auth"
 	"main/internal/config"
 	"main/internal/handler"
 	"main/internal/middleware"
+	"time"
 
 	"github.com/antonlindstrom/pgstore"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/markbates/goth"
 	"github.com/markbates/goth/providers/google"
@@ -36,21 +37,28 @@ func New(cfg *config.Config, db *sql.DB) (*Server, error) {
 
 	goth.UseProviders(gp)
 
-	p, _ := goth.GetProvider("google")
-
-	fmt.Println("Name: ", p.Name(), gp.Name())
-
 	r.LoadHTMLGlob("templates/*")
 
-	h := handler.New(db, store)
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 
-	r.GET("/", h.Home)
-	r.GET("/auth/:provider", h.SignInWithProvider)
-	r.GET("/auth/:provider/callback", h.CallbackHandler)
+	h := handler.New(db, store, cfg)
+	api := r.Group("/api")
+	api.GET("/", h.Home)
+	api.GET("/auth/:provider", h.SignInWithProvider)
+	api.GET("/auth/:provider/callback", h.CallbackHandler)
+	api.GET("/auth/refresh", h.Refresh)
 
-	authorized := r.Group("/")
+	authorized := api.Group("/")
 	authorized.Use(middleware.Auth(store, db))
 	{
+		authorized.GET("/me", h.Me)
 		authorized.GET("/success", h.Success)
 		authorized.GET("/summaries", h.Summaries)
 	}

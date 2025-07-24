@@ -15,6 +15,7 @@ type Config struct {
 	ClientCallbackURL string
 	DatabaseURL       string
 	SessionSecret     string
+	FrontendURL       string
 }
 
 func Load() (*Config, error) {
@@ -28,6 +29,7 @@ func Load() (*Config, error) {
 	clientCallbackURL := os.Getenv("CLIENT_CALLBACK_URL")
 	databaseURL := os.Getenv("DATABASE_URL")
 	sessionSecret := os.Getenv("SESSION_SECRET")
+	frontendURL := os.Getenv("FRONTEND_URL")
 
 	if clientID == "" || clientSecret == "" || clientCallbackURL == "" || databaseURL == "" || sessionSecret == "" {
 		log.Fatal("Environment variables (CLIENT_ID, CLIENT_SECRET, CLIENT_CALLBACK_URL, DATABASE_URL, SESSION_SECRET) are required")
@@ -40,5 +42,6 @@ func Load() (*Config, error) {
 		ClientCallbackURL: clientCallbackURL,
 		DatabaseURL:       databaseURL,
 		SessionSecret:     sessionSecret,
+		FrontendURL:       frontendURL,
 	}, nil
 }

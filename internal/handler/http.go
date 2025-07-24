@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"html/template"
 	"main/internal/auth"
+	"main/internal/config"
 	"main/internal/database"
 	"main/internal/model"
 	"net/http"
+	"time"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/antonlindstrom/pgstore"
@@ -23,10 +25,11 @@ import (
 type Handler struct {
 	db    *sql.DB
 	store *pgstore.PGStore
+	cfg   *config.Config
 }
 
-func New(db *sql.DB, store *pgstore.PGStore) *Handler {
-	return &Handler{db, store}
+func New(db *sql.DB, store *pgstore.PGStore, cfg *config.Config) *Handler {
+	return &Handler{db, store, cfg}
 }
 
 func (h *Handler) Home(c *gin.Context) {
@@ -101,26 +104,84 @@ func (h *Handler) CallbackHandler(c *gin.Context) {
 		return
 	}
 
-	c.Redirect(http.StatusTemporaryRedirect, "/success")
+	c.Redirect(http.StatusTemporaryRedirect, "/api/success")
 }
 
 func (h *Handler) Success(c *gin.Context) {
-	c.Data(http.StatusOK, "text/html; charset=utf-8", fmt.Appendf(nil, `
-      <div style="
-          background-color: #fff;
-          padding: 40px;
-          border-radius: 8px;
-          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-          text-align: center;
-      ">
-          <h1 style="
-              color: #333;
-              margin-bottom: 20px;
-          ">You have Successfull signed in!</h1>
-          
-          </div>
-      </div>
-  `))
+	c.Redirect(http.StatusPermanentRedirect, h.cfg.FrontendURL)
+}
+
+func (h *Handler) Refresh(c *gin.Context) {
+	session, err := auth.GetSession(h.store, c.Request)
+	if err != nil {
+		c.AbortWithError(http.StatusInternalServerError, err)
+		return
+	}
+
+	userID, ok := session.Values["user_id"].(string)
+	if !ok || userID == "" {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+
+	user, err := database.FindUserByID(h.db, userID)
+
+	if err != nil {
+		c.AbortWithError(http.StatusNotFound, err)
+		return
+	}
+
+	err = auth.RefreshToken(user, h.db)
+	if err != nil {
+		session.Options.MaxAge = -1
+		if err := session.Save(c.Request, c.Writer); err != nil {
+			panic("Failed to remove session for user: " + userID)
+		}
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+
+	c.Status(http.StatusOK)
+}
+
+func (h *Handler) Me(c *gin.Context) {
+	session, err := auth.GetSession(h.store, c.Request)
+	if err != nil {
+		c.AbortWithError(http.StatusInternalServerError, err)
+		return
+	}
+
+	userID, ok := session.Values["user_id"].(string)
+	if !ok || userID == "" {
+		c.Redirect(http.StatusTemporaryRedirect, "/")
+		c.Abort()
+		return
+	}
+
+	user, err := database.FindUserByID(h.db, userID)
+	if err != nil {
+		c.AbortWithError(http.StatusInternalServerError, err)
+		return
+	}
+
+	if user == nil {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+
+	c.JSON(http.StatusOK, struct {
+		AvatarURL string
+		CreatedAt time.Time
+		Email     string
+		ID        string
+		Name      string
+	}{
+		AvatarURL: user.AvatarURL,
+		CreatedAt: user.CreatedAt,
+		Email:     user.Email,
+		ID:        user.ID,
+		Name:      user.Name,
+	})
 }
 
 func (h *Handler) Summaries(c *gin.Context) {
@@ -170,13 +231,12 @@ func (h *Handler) Summaries(c *gin.Context) {
 	}
 
 	m, err := gmailService.Users.Messages.Get("me", mails.Messages[0].Id).Do()
-
 	if err != nil {
 		c.AbortWithError(http.StatusInternalServerError, err)
 		return
 	}
 
-	data, err := base64.URLEncoding.DecodeString(m.Payload.Parts[1].Body.Data)
+	data, err := base64.URLEncoding.DecodeString(m.Payload.Body.Data)
 	if err != nil {
 		c.AbortWithError(http.StatusInternalServerError, err)
 		return
