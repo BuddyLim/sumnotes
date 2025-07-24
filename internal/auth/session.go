@@ -22,6 +22,7 @@ func NewStore(dbURL string, keyPairs ...[]byte) (*pgstore.PGStore, error) {
 		MaxAge:   86400 * 7, // 7 days
 		HttpOnly: true,
 		Secure:   true,
+		SameSite: http.SameSiteNoneMode,
 	}
 
 	return store, nil

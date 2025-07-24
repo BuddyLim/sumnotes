@@ -23,28 +23,19 @@ func Auth(store *pgstore.PGStore, db *sql.DB) gin.HandlerFunc {
 		userID, ok := session.Values["user_id"].(string)
 
 		if !ok || userID == "" {
-			c.Redirect(http.StatusTemporaryRedirect, "/")
-			c.Abort()
+			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
 
 		u, err := database.FindUserByID(db, userID)
 		if err != nil {
-			c.Redirect(http.StatusTemporaryRedirect, "/")
-			c.Abort()
+			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
 
 		if time.Now().After(u.TokenExpiry) || time.Now().Equal(u.TokenExpiry) {
-			if err = auth.RefreshToken(u, db); err != nil {
-				session.Options.MaxAge = -1
-				if err := session.Save(c.Request, c.Writer); err != nil {
-					panic("Failed to remove session for user: " + userID)
-				}
-				c.Redirect(http.StatusTemporaryRedirect, "/")
-				c.Abort()
-				return
-			}
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
 		}
 
 		c.Next()
