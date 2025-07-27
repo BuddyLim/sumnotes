@@ -28,6 +28,6 @@ func NewStore(dbURL string, keyPairs ...[]byte) (*pgstore.PGStore, error) {
 	return store, nil
 }
 
-func GetSession(store *pgstore.PGStore, r *http.Request) (*sessions.Session, error) {
+func GetSession(store sessions.Store, r *http.Request) (*sessions.Session, error) {
 	return store.Get(r, SessionName)
 }

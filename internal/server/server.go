@@ -1,27 +1,27 @@
 package server
 
 import (
-	"database/sql"
 	"main/internal/auth"
 	"main/internal/config"
+	"main/internal/database"
 	"main/internal/handler"
 	"main/internal/middleware"
 	"time"
 
-	"github.com/antonlindstrom/pgstore"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/sessions"
 	"github.com/markbates/goth"
 	"github.com/markbates/goth/providers/google"
 )
 
 type Server struct {
 	*gin.Engine
-	db    *sql.DB
-	store *pgstore.PGStore
+	db    database.UserStore
+	store sessions.Store
 }
 
-func New(cfg *config.Config, db *sql.DB) (*Server, error) {
+func New(cfg *config.Config, db database.UserStore) (*Server, error) {
 	r := gin.Default()
 
 	store, err := auth.NewStore(cfg.DatabaseURL, []byte(cfg.SessionSecret))
@@ -48,7 +48,7 @@ func New(cfg *config.Config, db *sql.DB) (*Server, error) {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	h := handler.New(db, store, cfg)
+	h := handler.New(db, store, cfg, gp)
 	api := r.Group("/api")
 	api.GET("/", h.Home)
 	api.GET("/auth/:provider", h.SignInWithProvider)

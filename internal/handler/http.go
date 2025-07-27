@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"fmt"
 	"html/template"
@@ -14,8 +13,9 @@ import (
 	"time"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
-	"github.com/antonlindstrom/pgstore"
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/sessions"
+	"github.com/markbates/goth"
 	"github.com/markbates/goth/gothic"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/gmail/v1"
@@ -23,13 +23,14 @@ import (
 )
 
 type Handler struct {
-	db    *sql.DB
-	store *pgstore.PGStore
+	db    database.UserStore
+	store sessions.Store
 	cfg   *config.Config
+	p     goth.Provider
 }
 
-func New(db *sql.DB, store *pgstore.PGStore, cfg *config.Config) *Handler {
-	return &Handler{db, store, cfg}
+func New(db database.UserStore, store sessions.Store, cfg *config.Config, p goth.Provider) *Handler {
+	return &Handler{db, store, cfg, p}
 }
 
 func (h *Handler) Home(c *gin.Context) {
@@ -68,14 +69,14 @@ func (h *Handler) CallbackHandler(c *gin.Context) {
 		return
 	}
 
-	dbUser, err := database.FindUserByEmail(h.db, gothUser.Email)
+	dbUser, err := h.db.FindUserByEmail(gothUser.Email)
 	if err != nil {
 		c.AbortWithError(http.StatusInternalServerError, err)
 		return
 	}
 
 	if dbUser == nil {
-		dbUser, err = database.CreateUser(h.db, &model.User{
+		dbUser, err = h.db.CreateUser(&model.User{
 			Email:     gothUser.Email,
 			Name:      gothUser.Name,
 			AvatarURL: gothUser.AvatarURL,
@@ -86,7 +87,7 @@ func (h *Handler) CallbackHandler(c *gin.Context) {
 		}
 	}
 
-	err = database.UpdateUserTokens(h.db, dbUser.ID, gothUser.AccessToken, gothUser.RefreshToken, gothUser.ExpiresAt)
+	err = h.db.UpdateUserTokens(dbUser.ID, gothUser.AccessToken, gothUser.RefreshToken, gothUser.ExpiresAt)
 	if err != nil {
 		c.AbortWithError(http.StatusInternalServerError, err)
 		return
@@ -124,14 +125,17 @@ func (h *Handler) Refresh(c *gin.Context) {
 		return
 	}
 
-	user, err := database.FindUserByID(h.db, userID)
-
+	user, err := h.db.FindUserByID(userID)
 	if err != nil {
+		c.AbortWithError(http.StatusInternalServerError, err)
+		return
+	}
+	if user == nil {
 		c.AbortWithError(http.StatusNotFound, err)
 		return
 	}
 
-	err = auth.RefreshToken(user, h.db)
+	err = auth.RefreshToken(user, h.db, h.p)
 	if err != nil {
 		session.Options.MaxAge = -1
 		if err := session.Save(c.Request, c.Writer); err != nil {
@@ -141,7 +145,7 @@ func (h *Handler) Refresh(c *gin.Context) {
 		return
 	}
 
-	c.Status(http.StatusOK)
+	c.JSON(http.StatusOK, user)
 }
 
 func (h *Handler) Me(c *gin.Context) {
@@ -158,7 +162,7 @@ func (h *Handler) Me(c *gin.Context) {
 		return
 	}
 
-	user, err := database.FindUserByID(h.db, userID)
+	user, err := h.db.FindUserByID(userID)
 	if err != nil {
 		c.AbortWithError(http.StatusInternalServerError, err)
 		return
@@ -198,7 +202,7 @@ func (h *Handler) Summaries(c *gin.Context) {
 		return
 	}
 
-	user, err := database.FindUserByID(h.db, userID)
+	user, err := h.db.FindUserByID(userID)
 	if err != nil {
 		c.AbortWithError(http.StatusInternalServerError, err)
 		return
@@ -250,5 +254,5 @@ func (h *Handler) Summaries(c *gin.Context) {
 		return
 	}
 
-	c.Data(http.StatusOK, "text/markdown; charset=utf-8", fmt.Appendf(nil, "%s", markdown))
+	c.Data(http.StatusOK, "text/markdown; charset=utf-8", []byte(markdown))
 }

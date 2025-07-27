@@ -19,7 +19,9 @@ func main() {
 	}
 	defer db.Close()
 
-	srv, err := server.New(cfg, db)
+	userStore := database.NewUserStore(db)
+
+	srv, err := server.New(cfg, userStore)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
 	}

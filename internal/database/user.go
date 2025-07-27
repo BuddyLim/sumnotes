@@ -8,7 +8,25 @@ import (
 	"github.com/google/uuid"
 )
 
-func FindUserByEmail(db *sql.DB, email string) (*model.User, error) {
+// UserStorer defines the interface for user database operations.
+type UserStore interface {
+	FindUserByEmail(email string) (*model.User, error)
+	FindUserByID(id string) (*model.User, error)
+	CreateUser(user *model.User) (*model.User, error)
+	UpdateUserTokens(userID, accessToken, refreshToken string, tokenExpiry time.Time) error
+}
+
+// DB holds the database connection pool.
+type DB struct {
+	*sql.DB
+}
+
+// NewUserStore creates a new DB instance.
+func NewUserStore(db *sql.DB) *DB {
+	return &DB{db}
+}
+
+func (db *DB) FindUserByEmail(email string) (*model.User, error) {
 	user := &model.User{}
 	var accessToken, refreshToken sql.NullString
 	var tokenExpiry sql.NullTime
@@ -28,7 +46,7 @@ func FindUserByEmail(db *sql.DB, email string) (*model.User, error) {
 	return user, nil
 }
 
-func FindUserByID(db *sql.DB, id string) (*model.User, error) {
+func (db *DB) FindUserByID(id string) (*model.User, error) {
 	user := &model.User{}
 	var accessToken, refreshToken sql.NullString
 	var tokenExpiry sql.NullTime
@@ -48,7 +66,7 @@ func FindUserByID(db *sql.DB, id string) (*model.User, error) {
 	return user, nil
 }
 
-func CreateUser(db *sql.DB, user *model.User) (*model.User, error) {
+func (db *DB) CreateUser(user *model.User) (*model.User, error) {
 	user.ID = uuid.New().String()
 	user.CreatedAt = time.Now()
 	user.UpdatedAt = time.Now()
@@ -61,7 +79,7 @@ func CreateUser(db *sql.DB, user *model.User) (*model.User, error) {
 	return user, nil
 }
 
-func UpdateUserTokens(db *sql.DB, userID, accessToken, refreshToken string, tokenExpiry time.Time) error {
+func (db *DB) UpdateUserTokens(userID, accessToken, refreshToken string, tokenExpiry time.Time) error {
 	_, err := db.Exec("UPDATE users SET access_token = $1, refresh_token = $2, token_expiry = $3, updated_at = $4 WHERE id = $5",
 		accessToken, refreshToken, tokenExpiry, time.Now(), userID)
 	return err
