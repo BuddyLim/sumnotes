@@ -37,6 +37,8 @@ func New(cfg *config.Config, db database.UserStore) (*Server, error) {
 
 	goth.UseProviders(gp)
 
+	auth := auth.NewGothicAuthenticator()
+
 	r.LoadHTMLGlob("templates/*")
 
 	r.Use(cors.New(cors.Config{
@@ -48,7 +50,7 @@ func New(cfg *config.Config, db database.UserStore) (*Server, error) {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	h := handler.New(db, store, cfg, gp)
+	h := handler.New(db, store, cfg, gp, auth)
 	api := r.Group("/api")
 	api.GET("/", h.Home)
 	api.GET("/auth/:provider", h.SignInWithProvider)

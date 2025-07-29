@@ -3,8 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
-	"html/template"
 	"main/internal/auth"
 	"main/internal/config"
 	"main/internal/database"
@@ -27,23 +25,18 @@ type Handler struct {
 	store sessions.Store
 	cfg   *config.Config
 	p     goth.Provider
+	auth  auth.Authenticator
 }
 
-func New(db database.UserStore, store sessions.Store, cfg *config.Config, p goth.Provider) *Handler {
-	return &Handler{db, store, cfg, p}
+func New(db database.UserStore, store sessions.Store, cfg *config.Config, p goth.Provider, auth auth.Authenticator) *Handler {
+
+	return &Handler{db, store, cfg, p, auth}
 }
 
 func (h *Handler) Home(c *gin.Context) {
-	tmpl, err := template.ParseFiles("templates/index.html")
-	if err != nil {
-		c.AbortWithStatus(http.StatusInternalServerError)
-		return
-	}
-	err = tmpl.Execute(c.Writer, gin.H{})
-	if err != nil {
-		c.AbortWithStatus(http.StatusInternalServerError)
-		return
-	}
+	c.JSON(http.StatusOK, struct{ Message string }{
+		Message: "sumnotes golang backend",
+	})
 }
 
 func (h *Handler) SignInWithProvider(c *gin.Context) {
@@ -62,9 +55,8 @@ func (h *Handler) CallbackHandler(c *gin.Context) {
 	q.Del("scope")
 	c.Request.URL.RawQuery = q.Encode()
 
-	gothUser, err := gothic.CompleteUserAuth(c.Writer, c.Request)
+	gothUser, err := h.auth.CompleteUserAuth(c.Writer, c.Request)
 	if err != nil {
-		fmt.Println("Error: ", err)
 		c.AbortWithError(http.StatusInternalServerError, err)
 		return
 	}
@@ -105,7 +97,7 @@ func (h *Handler) CallbackHandler(c *gin.Context) {
 		return
 	}
 
-	c.Redirect(http.StatusTemporaryRedirect, "/api/success")
+	c.Redirect(http.StatusTemporaryRedirect, h.cfg.FrontendURL)
 }
 
 func (h *Handler) Success(c *gin.Context) {
@@ -131,17 +123,21 @@ func (h *Handler) Refresh(c *gin.Context) {
 		return
 	}
 	if user == nil {
-		c.AbortWithError(http.StatusNotFound, err)
+		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
 
 	err = auth.RefreshToken(user, h.db, h.p)
 	if err != nil {
+		// When refresh fails, the user is no longer authenticated.
+		// We should clear the session and return 401 Unauthorized.
 		session.Options.MaxAge = -1
 		if err := session.Save(c.Request, c.Writer); err != nil {
-			panic("Failed to remove session for user: " + userID)
+			// If we can't even save the session, something is very wrong.
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
 		}
-		c.AbortWithStatus(http.StatusNotFound)
+		c.AbortWithStatus(http.StatusUnauthorized)
 		return
 	}
 
@@ -157,8 +153,7 @@ func (h *Handler) Me(c *gin.Context) {
 
 	userID, ok := session.Values["user_id"].(string)
 	if !ok || userID == "" {
-		c.Redirect(http.StatusTemporaryRedirect, "/")
-		c.Abort()
+		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
 
