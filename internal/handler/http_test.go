@@ -411,7 +411,7 @@ func TestCallBackHandler(t *testing.T) {
 			router.ServeHTTP(w, req)
 
 			if tc.expectedStatus == http.StatusTemporaryRedirect {
-				assert.Equal(t, "http://example.co", w.Result().Header.Get("Location"))
+				assert.Equal(t, "http://example.com", w.Result().Header.Get("Location"))
 
 			}
 

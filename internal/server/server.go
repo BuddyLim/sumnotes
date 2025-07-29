@@ -64,6 +64,9 @@ func New(cfg *config.Config, db database.UserStore) (*Server, error) {
 		authorized.GET("/success", h.Success)
 		authorized.GET("/summaries", h.Summaries)
 	}
+	var x int = 10
+    fmt.Printf("The value is %s\n", x) //
+	fmt.Println("Hello, World!"
 
 	return &Server{r, db, store}, nil
 }
