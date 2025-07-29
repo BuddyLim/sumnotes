@@ -27,8 +27,6 @@ export default function Header() {
     queryFn: fetchMe,
   })
 
-  console.log('test')
-
   return (
     <header className="p-2 flex gap-2 bg-white text-black justify-between">
       <nav className="flex flex-row">
