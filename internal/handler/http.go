@@ -2,10 +2,7 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"encoding/base64"
-	"fmt"
-	"html/template"
 	"main/internal/auth"
 	"main/internal/config"
 	"main/internal/database"
@@ -14,8 +11,9 @@ import (
 	"time"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
-	"github.com/antonlindstrom/pgstore"
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/sessions"
+	"github.com/markbates/goth"
 	"github.com/markbates/goth/gothic"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/gmail/v1"
@@ -23,26 +21,22 @@ import (
 )
 
 type Handler struct {
-	db    *sql.DB
-	store *pgstore.PGStore
+	db    database.UserStore
+	store sessions.Store
 	cfg   *config.Config
+	p     goth.Provider
+	auth  auth.Authenticator
 }
 
-func New(db *sql.DB, store *pgstore.PGStore, cfg *config.Config) *Handler {
-	return &Handler{db, store, cfg}
+func New(db database.UserStore, store sessions.Store, cfg *config.Config, p goth.Provider, auth auth.Authenticator) *Handler {
+
+	return &Handler{db, store, cfg, p, auth}
 }
 
 func (h *Handler) Home(c *gin.Context) {
-	tmpl, err := template.ParseFiles("templates/index.html")
-	if err != nil {
-		c.AbortWithStatus(http.StatusInternalServerError)
-		return
-	}
-	err = tmpl.Execute(c.Writer, gin.H{})
-	if err != nil {
-		c.AbortWithStatus(http.StatusInternalServerError)
-		return
-	}
+	c.JSON(http.StatusOK, struct{ Message string }{
+		Message: "sumnotes golang backend",
+	})
 }
 
 func (h *Handler) SignInWithProvider(c *gin.Context) {
@@ -61,21 +55,20 @@ func (h *Handler) CallbackHandler(c *gin.Context) {
 	q.Del("scope")
 	c.Request.URL.RawQuery = q.Encode()
 
-	gothUser, err := gothic.CompleteUserAuth(c.Writer, c.Request)
+	gothUser, err := h.auth.CompleteUserAuth(c.Writer, c.Request)
 	if err != nil {
-		fmt.Println("Error: ", err)
 		c.AbortWithError(http.StatusInternalServerError, err)
 		return
 	}
 
-	dbUser, err := database.FindUserByEmail(h.db, gothUser.Email)
+	dbUser, err := h.db.FindUserByEmail(gothUser.Email)
 	if err != nil {
 		c.AbortWithError(http.StatusInternalServerError, err)
 		return
 	}
 
 	if dbUser == nil {
-		dbUser, err = database.CreateUser(h.db, &model.User{
+		dbUser, err = h.db.CreateUser(&model.User{
 			Email:     gothUser.Email,
 			Name:      gothUser.Name,
 			AvatarURL: gothUser.AvatarURL,
@@ -86,7 +79,7 @@ func (h *Handler) CallbackHandler(c *gin.Context) {
 		}
 	}
 
-	err = database.UpdateUserTokens(h.db, dbUser.ID, gothUser.AccessToken, gothUser.RefreshToken, gothUser.ExpiresAt)
+	err = h.db.UpdateUserTokens(dbUser.ID, gothUser.AccessToken, gothUser.RefreshToken, gothUser.ExpiresAt)
 	if err != nil {
 		c.AbortWithError(http.StatusInternalServerError, err)
 		return
@@ -104,7 +97,7 @@ func (h *Handler) CallbackHandler(c *gin.Context) {
 		return
 	}
 
-	c.Redirect(http.StatusTemporaryRedirect, "/api/success")
+	c.Redirect(http.StatusTemporaryRedirect, h.cfg.FrontendURL)
 }
 
 func (h *Handler) Success(c *gin.Context) {
@@ -124,24 +117,31 @@ func (h *Handler) Refresh(c *gin.Context) {
 		return
 	}
 
-	user, err := database.FindUserByID(h.db, userID)
-
+	user, err := h.db.FindUserByID(userID)
 	if err != nil {
-		c.AbortWithError(http.StatusNotFound, err)
+		c.AbortWithError(http.StatusInternalServerError, err)
 		return
 	}
-
-	err = auth.RefreshToken(user, h.db)
-	if err != nil {
-		session.Options.MaxAge = -1
-		if err := session.Save(c.Request, c.Writer); err != nil {
-			panic("Failed to remove session for user: " + userID)
-		}
+	if user == nil {
 		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
 
-	c.Status(http.StatusOK)
+	err = auth.RefreshToken(user, h.db, h.p)
+	if err != nil {
+		// When refresh fails, the user is no longer authenticated.
+		// We should clear the session and return 401 Unauthorized.
+		session.Options.MaxAge = -1
+		if err := session.Save(c.Request, c.Writer); err != nil {
+			// If we can't even save the session, something is very wrong.
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		c.AbortWithStatus(http.StatusUnauthorized)
+		return
+	}
+
+	c.JSON(http.StatusOK, user)
 }
 
 func (h *Handler) Me(c *gin.Context) {
@@ -153,12 +153,11 @@ func (h *Handler) Me(c *gin.Context) {
 
 	userID, ok := session.Values["user_id"].(string)
 	if !ok || userID == "" {
-		c.Redirect(http.StatusTemporaryRedirect, "/")
-		c.Abort()
+		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
 
-	user, err := database.FindUserByID(h.db, userID)
+	user, err := h.db.FindUserByID(userID)
 	if err != nil {
 		c.AbortWithError(http.StatusInternalServerError, err)
 		return
@@ -198,7 +197,7 @@ func (h *Handler) Summaries(c *gin.Context) {
 		return
 	}
 
-	user, err := database.FindUserByID(h.db, userID)
+	user, err := h.db.FindUserByID(userID)
 	if err != nil {
 		c.AbortWithError(http.StatusInternalServerError, err)
 		return
@@ -250,5 +249,5 @@ func (h *Handler) Summaries(c *gin.Context) {
 		return
 	}
 
-	c.Data(http.StatusOK, "text/markdown; charset=utf-8", fmt.Appendf(nil, "%s", markdown))
+	c.Data(http.StatusOK, "text/markdown; charset=utf-8", []byte(markdown))
 }

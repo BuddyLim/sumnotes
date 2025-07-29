@@ -1,24 +1,27 @@
 package auth
 
 import (
-	"database/sql"
+	"errors"
+	"fmt"
 	"main/internal/database"
 	"main/internal/model"
 
 	"github.com/markbates/goth"
 )
 
-func RefreshToken(u *model.User, db *sql.DB) error {
-	p, err := goth.GetProvider("google")
+var (
+	ErrRefreshFailed = errors.New("failed to refresh token with provider")
+)
+
+func RefreshToken(u *model.User, db database.UserStore, p goth.Provider) error {
+	newToken, err := p.RefreshToken(u.RefreshToken)
 	if err != nil {
-		return err
+		return ErrRefreshFailed
 	}
 
-	n, err := p.RefreshToken(u.RefreshToken)
+	err = db.UpdateUserTokens(u.ID, newToken.AccessToken, newToken.RefreshToken, newToken.Expiry)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to update user tokens in database: %w", err)
 	}
-
-	return database.UpdateUserTokens(db, u.ID, n.AccessToken, n.RefreshToken, n.Expiry)
-
+	return nil
 }
