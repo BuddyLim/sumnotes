@@ -438,11 +438,12 @@ func TestHandler_Me(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	expectedUser := &model.User{
-		ID:        "user-123",
-		Name:      "Test User",
-		Email:     "test@example.com",
-		AvatarURL: "http://example.com/avatar.png",
-		CreatedAt: time.Now(),
+		ID:          "user-123",
+		Name:        "Test User",
+		Email:       "test@example.com",
+		AvatarURL:   "http://example.com/avatar.png",
+		CreatedAt:   time.Now(),
+		AccessToken: "abc",
 	}
 
 	testCases := []struct {
